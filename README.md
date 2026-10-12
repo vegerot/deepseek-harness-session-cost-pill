@@ -48,6 +48,30 @@ all-off-peak total is $1.301116, while the platform's own billed total (`$0.4537
 **$1.301116 at FX 7.0877 CNY/USD** — a 0.11% match. That independently confirms the table above, and confirms the
 usage was effectively all off-peak (assuming peak would have doubled it).
 
+### Deferred: account-level spend
+
+Real billed cost (rather than this estimate) is reachable, but is **not** implemented here. Recorded so a future
+attempt does not re-derive it:
+
+- DeepSeek has **no public pricing API**. `GET /models` returns capability metadata only, `POST /chat/completions`
+  returns token counts with no cost field, `GET /user/balance` returns balance with no rates, and `/pricing`,
+  `/models/pricing`, `/usage` are 404 with no OpenAPI spec published.
+- The **Platform console** does have working private endpoints, authenticated with `x-dsh-auth-token: <grant>` (not
+  `Authorization: Bearer`), plus `x-client-platform: web`:
+  - `GET platform.deepseek.com/api/v0/users/get_user_summary` — wallets and `total_costs` in USD and CNY.
+  - `GET platform.deepseek.com/api/v0/usage/cost?month=<m>&year=<y>` — per-model, per-bucket cost, in per-currency
+    blocks each carrying `currency`, `total`, and 31 daily buckets. `usage/amount` returns the same shape in tokens.
+  - These are undocumented dashboard internals and may change without notice.
+- DSH already holds the grant: `ctx.deepseekAccount.getPlatformSession()` is Host-only and returns
+  `{ origin, token, userId, requestHeaders? }`. The account service exposes no usage or cost method, so a Host half
+  must fetch these endpoints itself.
+- **Why it is not built:** a Host half *can* register a Remote buildlessly — `@Remote` is sugar over a string-keyed
+  prototype property (`'@deepseek-ai/dsh-typert-protocol/remote-methods'`), which plain JS can define directly, and
+  `bindTypertRemote()` needs no compiler metadata. But the **browser half cannot consume** a Remote without generated
+  zod codecs, so it needs the Typert generator or bundled `zod` — ending the buildless single-file design. Doing it
+  buildlessly instead means a `ctx.webServer.register` route plus a same-origin fetch, which puts the data on a
+  loopback route outside the app's session auth.
+
 ## Testing
 
 ```bash
