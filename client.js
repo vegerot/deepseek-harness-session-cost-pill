@@ -12,6 +12,15 @@
  */
 
 /**
+ * One model's published off-peak and peak list prices. DeepSeek charges peak
+ * rates during its weekday peak windows and half of them at all other times,
+ * so a single rate per model cannot price a session correctly.
+ * @typedef {object} ModelRates
+ * @property {ModelRate} offPeak
+ * @property {ModelRate} peak
+ */
+
+/**
  * Session token totals as the `tokenUsage` projection reports them; the four
  * prompt/output buckets are disjoint, so summing them is the true total.
  * @typedef {object} TokenUsage
@@ -39,10 +48,25 @@
  */
 
 /**
- * The session standard kit's key-addressed projection reader, injected into
- * every session-scoped slot entry.
+ * One settled assistant step from the chat snapshot. `time` is the epoch ms of
+ * the settled message — the request's own instant, which decides its rate.
+ * @typedef {object} AssistantStep
+ * @property {number} time
+ * @property {TokenUsage} [usage]
+ */
+
+/**
+ * The slice of the chat snapshot this pill reads.
+ * @typedef {object} ChatSnapshot
+ * @property {{ nodes: readonly AssistantStep[] }} legacy
+ */
+
+/**
+ * The session standard kit, injected into every session-scoped slot entry:
+ * a key-addressed projection reader and the Chat snapshot selector hook.
  * @typedef {object} CostPillProps
  * @property {(key: string) => unknown} [useProjection]
+ * @property {(selector: (snapshot: ChatSnapshot) => readonly AssistantStep[]) => readonly AssistantStep[]} [useChat]
  */
 
 /**
@@ -62,9 +86,10 @@
  * @typedef {object} PluginModule
  * @property {string[]} inject
  * @property {(ctx: SlotContext) => void} apply
- * @property {Record<string, ModelRate>} RATES
+ * @property {Record<string, ModelRates>} RATES
  * @property {(epochMs: number) => boolean} isPeak
- * @property {(usage: TokenUsage, modelId: string) => CostBreakdown | null} calculateSessionCost
+ * @property {(usage: TokenUsage, modelId: string, peak: boolean) => CostBreakdown | null} costOfUsage
+ * @property {(nodes: readonly AssistantStep[], modelId: string) => CostBreakdown | null} calculateSessionCost
  * @property {(amount: number) => string} formatCost
  * @property {(props: CostPillProps) => unknown} CostPill
  */
@@ -87,12 +112,22 @@ shell.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
-    // DeepSeek rates ($ per 1M tokens)
-    /** @type {Record<string, ModelRate>} */
+    // DeepSeek published list prices, USD per 1M tokens, transcribed from
+    // https://api-docs.deepseek.com/quick_start/pricing/ — off-peak and peak
+    // are stored separately rather than derived, so the table stays a direct
+    // transcription of the source and cannot drift from a stale multiplier.
+    // The retired deepseek-chat and deepseek-reasoner aliases are absent:
+    // GET /models now returns only deepseek-flash and deepseek-v4-pro.
+    /** @type {Record<string, ModelRates>} */
     const RATES = {
-      'deepseek-flash': { miss: 0.14, hit: 0.014, out: 0.28 },
-      'deepseek-chat': { miss: 0.27, hit: 0.07, out: 1.10 },
-      'deepseek-reasoner': { miss: 0.55, hit: 0.14, out: 2.19 },
+      'deepseek-flash': {
+        offPeak: { hit: 0.003, miss: 0.15, out: 0.60 },
+        peak: { hit: 0.006, miss: 0.30, out: 1.20 },
+      },
+      'deepseek-v4-pro': {
+        offPeak: { hit: 0.022, miss: 0.66, out: 1.98 },
+        peak: { hit: 0.044, miss: 1.32, out: 3.96 },
+      },
     };
 
     /**
@@ -114,14 +149,19 @@ shell.__ModuleLoader__.load({
     }
 
     /**
-     * Price one session's token totals at one model's route rate.
+     * Price one request's token totals at one model's route rate.
+     *
+     * DeepSeek bills cache reads and cache misses but has no cache-write line,
+     * so `cacheWriteTokens` is deliberately not priced.
      * @param {TokenUsage} usage
      * @param {string} modelId
+     * @param {boolean} peak Whether the request ran inside a peak window.
      * @returns {CostBreakdown | null} null when the model has no configured rate.
      */
-    function calculateSessionCost(usage, modelId) {
-      const pricing = RATES[modelId];
-      if (!pricing) return null;
+    function costOfUsage(usage, modelId, peak) {
+      const model = RATES[modelId];
+      if (!model) return null;
+      const pricing = peak ? model.peak : model.offPeak;
 
       const missCost = ((usage.uncachedInputTokens || 0) * pricing.miss) / 1_000_000;
       const hitCost = ((usage.cacheReadTokens || 0) * pricing.hit) / 1_000_000;
@@ -129,6 +169,42 @@ shell.__ModuleLoader__.load({
       const totalCost = missCost + hitCost + outCost;
 
       return { missCost, hitCost, outCost, totalCost };
+    }
+
+    /**
+     * Price a whole session by pricing every assistant step at the rate in
+     * effect for that step's own timestamp.
+     *
+     * The session-wide `tokenUsage` projection cannot drive this: it carries no
+     * timestamps, so a session straddling a peak boundary would be billed at one
+     * blended rate. Steps with no usage record (aborted or interrupted attempts)
+     * and steps that billed nothing contribute nothing.
+     * @param {readonly AssistantStep[]} nodes Settled chat nodes.
+     * @param {string} modelId The session's model.
+     * @returns {CostBreakdown | null} null when the model is unpriced or nothing billed.
+     */
+    function calculateSessionCost(nodes, modelId) {
+      if (!RATES[modelId]) return null;
+
+      let missCost = 0;
+      let hitCost = 0;
+      let outCost = 0;
+      let billed = false;
+      for (const node of nodes) {
+        const usage = node.usage;
+        if (usage === undefined) continue;
+        const tokens = (usage.uncachedInputTokens || 0) + (usage.cacheReadTokens || 0) + (usage.outputTokens || 0);
+        if (tokens === 0) continue;
+        const step = costOfUsage(usage, modelId, isPeak(node.time));
+        if (step === null) continue;
+        missCost += step.missCost;
+        hitCost += step.hitCost;
+        outCost += step.outCost;
+        billed = true;
+      }
+      if (!billed) return null;
+
+      return { missCost, hitCost, outCost, totalCost: missCost + hitCost + outCost };
     }
 
     /**
@@ -150,18 +226,15 @@ shell.__ModuleLoader__.load({
      */
     function CostPill(props) {
       const useProjection = props.useProjection;
-      if (!useProjection) return null;
+      const useChat = props.useChat;
+      if (!useProjection || !useChat) return null;
 
-      const usage = /** @type {TokenUsage | undefined} */ (useProjection('tokenUsage'));
-      if (!usage) return null;
-
-      const totalTokens = (usage.uncachedInputTokens || 0) + (usage.cacheReadTokens || 0) + (usage.outputTokens || 0);
-      if (totalTokens === 0) return null;
+      const nodes = useChat((snapshot) => snapshot.legacy.nodes);
 
       const modelSelection = /** @type {ModelSelection | undefined} */ (useProjection('modelSelection'));
       const modelId = modelSelection?.lastUsed?.model || modelSelection?.next?.model || '';
 
-      const cost = calculateSessionCost(usage, modelId);
+      const cost = calculateSessionCost(nodes, modelId);
       if (!cost) return null;
 
       const formatted = formatCost(cost.totalCost);
@@ -199,6 +272,7 @@ shell.__ModuleLoader__.load({
       // Export internals for test runner
       RATES,
       isPeak,
+      costOfUsage,
       calculateSessionCost,
       formatCost,
       CostPill,

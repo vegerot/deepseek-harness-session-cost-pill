@@ -18,7 +18,7 @@ const mockWindow: any = {
 
 await import('./client.js');
 
-const { RATES, calculateSessionCost, formatCost, CostPill, isPeak } = pluginModule;
+const { RATES, costOfUsage, calculateSessionCost, formatCost, CostPill, isPeak } = pluginModule;
 
 describe('isPeak', () => {
   // Peak is 01:00-04:00 and 06:00-10:00 UTC, Monday-Friday. 2026-10-12 is a Monday.
@@ -53,29 +53,99 @@ describe('isPeak', () => {
   });
 });
 
-describe('calculateSessionCost', () => {
+// One million of each bucket makes the per-1M rate directly readable as dollars.
+const millionEach = {
+  uncachedInputTokens: 1_000_000,
+  cacheReadTokens: 1_000_000,
+  outputTokens: 1_000_000,
+};
+const close = (actual: number, expected: number) =>
+  assert.ok(Math.abs(actual - expected) < 1e-9, `expected ${actual} ≈ ${expected}`);
+// 2026-10-12 is a Monday; 02:00 UTC is peak, 05:00 UTC is off-peak.
+const PEAK_AT = Date.UTC(2026, 9, 12, 2);
+const OFF_PEAK_AT = Date.UTC(2026, 9, 12, 5);
+const step = (at: number, usage?: object) => ({ kind: 'assistant', time: at, usage });
+
+describe('costOfUsage', () => {
   it('returns null when modelId is not present in RATES', () => {
-    const usage = {
-      uncachedInputTokens: 1000,
-      cacheReadTokens: 5000,
-      outputTokens: 200,
-    };
-    const result = calculateSessionCost(usage, 'unknown-model');
-    assert.equal(result, null);
+    assert.equal(costOfUsage(millionEach, 'unknown-model', false), null);
   });
 
-  it('calculates cost breakdown and total for deepseek-flash', () => {
-    const usage = {
-      uncachedInputTokens: 1_000_000,
-      cacheReadTokens: 10_000_000,
-      outputTokens: 500_000,
-    };
-    const result = calculateSessionCost(usage, 'deepseek-flash');
+  it('prices deepseek-flash at its published off-peak rates', () => {
+    const result = costOfUsage(millionEach, 'deepseek-flash', false);
     assert.notEqual(result, null);
-    assert.equal(result.missCost, 0.14);
-    assert.equal(result.hitCost, 0.14);
-    assert.equal(result.outCost, 0.14);
-    assert.ok(Math.abs(result.totalCost - 0.42) < 1e-9);
+    close(result!.hitCost, 0.003);
+    close(result!.missCost, 0.15);
+    close(result!.outCost, 0.6);
+    close(result!.totalCost, 0.753);
+  });
+
+  it('prices deepseek-flash at exactly double during peak', () => {
+    const result = costOfUsage(millionEach, 'deepseek-flash', true);
+    assert.notEqual(result, null);
+    close(result!.hitCost, 0.006);
+    close(result!.missCost, 0.3);
+    close(result!.outCost, 1.2);
+  });
+
+  it('prices deepseek-v4-pro at its published rates', () => {
+    const off = costOfUsage(millionEach, 'deepseek-v4-pro', false);
+    assert.notEqual(off, null);
+    close(off!.hitCost, 0.022);
+    close(off!.missCost, 0.66);
+    close(off!.outCost, 1.98);
+
+    const peak = costOfUsage(millionEach, 'deepseek-v4-pro', true);
+    assert.notEqual(peak, null);
+    close(peak!.hitCost, 0.044);
+    close(peak!.missCost, 1.32);
+    close(peak!.outCost, 3.96);
+  });
+
+  it('carries no rate for the retired chat and reasoner aliases', () => {
+    assert.equal(costOfUsage(millionEach, 'deepseek-chat', false), null);
+    assert.equal(costOfUsage(millionEach, 'deepseek-reasoner', false), null);
+  });
+});
+
+describe('calculateSessionCost', () => {
+  it('returns null when no step reports billable usage', () => {
+    assert.equal(calculateSessionCost([], 'deepseek-flash'), null);
+    assert.equal(calculateSessionCost([step(OFF_PEAK_AT, undefined)], 'deepseek-flash'), null);
+    assert.equal(
+      calculateSessionCost([step(OFF_PEAK_AT, { uncachedInputTokens: 0, cacheReadTokens: 0, outputTokens: 0 })], 'deepseek-flash'),
+      null,
+    );
+  });
+
+  it('prices an off-peak step at the off-peak rate', () => {
+    const result = calculateSessionCost([step(OFF_PEAK_AT, millionEach)], 'deepseek-flash');
+    assert.notEqual(result, null);
+    close(result!.outCost, 0.6);
+  });
+
+  it('prices a peak step at the peak rate', () => {
+    const result = calculateSessionCost([step(PEAK_AT, millionEach)], 'deepseek-flash');
+    assert.notEqual(result, null);
+    close(result!.outCost, 1.2);
+  });
+
+  // The behaviour a session-wide total cannot reproduce: each step is priced by
+  // its OWN timestamp, so a session spanning a peak boundary is not charged a
+  // single blended rate.
+  it('prices each step by its own timestamp within one session', () => {
+    const result = calculateSessionCost(
+      [step(OFF_PEAK_AT, millionEach), step(PEAK_AT, millionEach)],
+      'deepseek-flash',
+    );
+    assert.notEqual(result, null);
+    close(result!.outCost, 0.6 + 1.2);
+    close(result!.missCost, 0.15 + 0.3);
+    close(result!.hitCost, 0.003 + 0.006);
+  });
+
+  it('returns null when the model has no configured rate', () => {
+    assert.equal(calculateSessionCost([step(OFF_PEAK_AT, millionEach)], 'unknown-model'), null);
   });
 });
 
@@ -95,65 +165,54 @@ describe('formatCost', () => {
 });
 
 describe('CostPill', () => {
-  it('returns null when useProjection is missing', () => {
-    const element = CostPill({});
+  const modelIs = (model: string) => (key: string) =>
+    key === 'modelSelection' ? { lastUsed: { model } } : undefined;
+  const chatWith = (nodes: readonly unknown[]) =>
+    (selector: (snapshot: unknown) => unknown) => selector({ legacy: { nodes } });
+
+  it('returns null without the session standard kit', () => {
+    assert.equal(CostPill({}), null);
+    assert.equal(CostPill({ useProjection: modelIs('deepseek-flash') }), null);
+    assert.equal(CostPill({ useChat: chatWith([]) }), null);
+  });
+
+  it('returns null when no step billed anything', () => {
+    assert.equal(CostPill({ useProjection: modelIs('deepseek-flash'), useChat: chatWith([]) }), null);
+    assert.equal(
+      CostPill({
+        useProjection: modelIs('deepseek-flash'),
+        useChat: chatWith([step(OFF_PEAK_AT, { uncachedInputTokens: 0, cacheReadTokens: 0, outputTokens: 0 })]),
+      }),
+      null,
+    );
+  });
+
+  it('returns null when the model has no configured rate', () => {
+    const element = CostPill({
+      useProjection: modelIs('unknown-model'),
+      useChat: chatWith([step(OFF_PEAK_AT, millionEach)]),
+    });
     assert.equal(element, null);
   });
 
-  it('returns null when tokenUsage has 0 tokens', () => {
-    const mockUseProjection = (key: string) => {
-      if (key === 'tokenUsage') {
-        return { uncachedInputTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
-      }
-      if (key === 'modelSelection') {
-        return { lastUsed: { model: 'deepseek-flash' } };
-      }
-      return undefined;
-    };
-    const element = CostPill({ useProjection: mockUseProjection });
-    assert.equal(element, null);
-  });
-
-  it('returns null when modelId is not in RATES', () => {
-    const mockUseProjection = (key: string) => {
-      if (key === 'tokenUsage') {
-        return { uncachedInputTokens: 1000, cacheReadTokens: 5000, outputTokens: 200 };
-      }
-      if (key === 'modelSelection') {
-        return { lastUsed: { model: 'unknown-model' } };
-      }
-      return undefined;
-    };
-    const element = CostPill({ useProjection: mockUseProjection });
-    assert.equal(element, null);
-  });
-
-  it('renders cost pill with semantic styling and breakdown for valid tokens', () => {
-    const mockUseProjection = (key: string) => {
-      if (key === 'tokenUsage') {
-        return {
-          uncachedInputTokens: 1_000_000,
-          cacheReadTokens: 10_000_000,
-          outputTokens: 500_000,
-        };
-      }
-      if (key === 'modelSelection') {
-        return { lastUsed: { model: 'deepseek-flash' } };
-      }
-      return undefined;
-    };
-    const element = CostPill({ useProjection: mockUseProjection });
+  // End-to-end proof of per-request pricing: one off-peak and one peak step,
+  // summed at their own rates (0.009 + 0.45 + 1.80 = 2.259).
+  it('renders spend priced per step, with semantic styling and a breakdown', () => {
+    const element = CostPill({
+      useProjection: modelIs('deepseek-flash'),
+      useChat: chatWith([step(OFF_PEAK_AT, millionEach), step(PEAK_AT, millionEach)]),
+    });
     assert.notEqual(element, null);
-    assert.equal(element.type, 'span');
-    assert.equal(element.props['data-composer-stat'], 'cost');
-    assert.equal(element.props.children, '💸 $0.42');
-    assert.match(element.props.title, /Estimated Spend: \$0\.42/);
-    assert.match(element.props.title, /Input: \$0\.1400/);
-    assert.match(element.props.title, /Cache Read: \$0\.1400/);
-    assert.match(element.props.title, /Output: \$0\.1400/);
-    assert.match(element.props.style.background, /oklch/);
-    assert.match(element.props.style.border, /oklch/);
-    assert.equal(element.props.style.gap, '0.35rem');
+    assert.equal(element!.type, 'span');
+    assert.equal(element!.props['data-composer-stat'], 'cost');
+    assert.equal(element!.props.children, '💸 $2.26');
+    assert.match(element!.props.title, /Estimated Spend: \$2\.26/);
+    assert.match(element!.props.title, /Input: \$0\.4500/);
+    assert.match(element!.props.title, /Cache Read: \$0\.0090/);
+    assert.match(element!.props.title, /Output: \$1\.8000/);
+    assert.match(element!.props.style.background, /oklch/);
+    assert.match(element!.props.style.border, /oklch/);
+    assert.equal(element!.props.style.gap, '0.35rem');
   });
 });
 

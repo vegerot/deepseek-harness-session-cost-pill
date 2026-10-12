@@ -5,6 +5,8 @@ A DeepSeek Harness plugin that displays estimated API spend for the current sess
 ## Features
 
 - **Live Spend Display**: Displays `💸 $X.XX` (or `<$0.01`) in the composer dock alongside turn/step count, speed, and token usage.
+- **Per-Request Pricing**: Every assistant step is priced at the rate in effect for *its own* timestamp, so a session
+  that spans a peak boundary is not charged a single blended rate.
 - **Detailed Tooltip**: Hovering shows the exact breakdown of:
   - Estimated total spend
   - Uncached input spend
@@ -12,6 +14,39 @@ A DeepSeek Harness plugin that displays estimated API spend for the current sess
   - Output token spend
 - **Modern Styling**: Uses semantic CSS units (`rem`) and perceptual `oklch` color formatting.
 - **Zero Core Modifications**: Implemented 100% as a standard Cordis client-bundle plugin. Works seamlessly for both Web and Desktop profiles.
+
+## Pricing model
+
+Rates are USD per 1M tokens, transcribed from [Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/):
+
+| Model | | Cache hit | Cache miss | Output |
+|---|---|---|---|---|
+| `deepseek-flash` | off-peak | 0.003 | 0.15 | 0.60 |
+| | peak | 0.006 | 0.30 | 1.20 |
+| `deepseek-v4-pro` | off-peak | 0.022 | 0.66 | 1.98 |
+| | peak | 0.044 | 1.32 | 3.96 |
+
+Peak is **01:00–04:00 and 06:00–10:00 UTC, Monday–Friday**; everything else is off-peak. DeepSeek has no cache-write
+charge, so `cacheWriteTokens` is not priced.
+
+The retired `deepseek-chat` and `deepseek-reasoner` aliases carry no rate — `GET /models` now returns only
+`deepseek-flash` and `deepseek-v4-pro`, and an unpriced model renders no pill rather than a wrong number.
+
+### Known limits
+
+- **Chinese public holidays are off-peak in full**, and this is not modelled: it would need a PRC holiday calendar.
+  Weekday windows falling inside a holiday week are therefore priced as peak, slightly overstating those days.
+- **The model is priced at session level**, from the `modelSelection` projection. The chat snapshot's assistant nodes
+  carry `time` and `usage` but not the model, so a session that switched models mid-way prices every step at the
+  most recently used model's rates.
+
+### Validated against real billing
+
+DeepSeek exposes no public pricing API, but the DeepSeek Platform console does report authoritative cost. For this
+account's October `deepseek-flash` usage (hit 140.56512M, miss 2.828971M, out 0.758458M tokens), the published
+all-off-peak total is $1.301116, while the platform's own billed total (`$0.453778398` + `¥6.0056894`) converts to
+**$1.301116 at FX 7.0877 CNY/USD** — a 0.11% match. That independently confirms the table above, and confirms the
+usage was effectively all off-peak (assuming peak would have doubled it).
 
 ## Testing
 
