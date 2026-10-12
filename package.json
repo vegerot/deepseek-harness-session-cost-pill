@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
-    "src",
+    "index.js",
     "client.js",
     "cordis.patch.yml",
     "locale/*.json",
@@ -29,7 +29,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

@@ -4,14 +4,33 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
 
+    // DeepSeek rates ($ per 1M tokens)
     const RATES = {
       'deepseek-flash': { miss: 0.14, hit: 0.014, out: 0.28 },
       'deepseek-chat': { miss: 0.27, hit: 0.07, out: 1.10 },
       'deepseek-reasoner': { miss: 0.55, hit: 0.14, out: 2.19 },
     };
 
+    function calculateSessionCost(usage, modelId) {
+      const pricing = RATES[modelId];
+      if (!pricing) return null;
+
+      const missCost = ((usage.uncachedInputTokens || 0) * pricing.miss) / 1_000_000;
+      const hitCost = ((usage.cacheReadTokens || 0) * pricing.hit) / 1_000_000;
+      const outCost = ((usage.outputTokens || 0) * pricing.out) / 1_000_000;
+      const totalCost = missCost + hitCost + outCost;
+
+      return { missCost, hitCost, outCost, totalCost };
+    }
+
+    function formatCost(amount) {
+      if (amount === 0) return '$0.00';
+      if (amount < 0.01) return '<$0.01';
+      return '$' + amount.toFixed(2);
+    }
+
     function CostPill(props) {
-      if (!props.useProjection) return null;
+      if (!props || !props.useProjection) return null;
 
       const usage = props.useProjection('tokenUsage');
       if (!usage) return null;
@@ -22,16 +41,11 @@ window.__ModuleLoader__.load({
       const modelSelection = props.useProjection('modelSelection');
       const modelId = modelSelection?.lastUsed?.model || modelSelection?.next?.model || '';
 
-      const pricing = RATES[modelId];
-      if (!pricing) return null;
+      const cost = calculateSessionCost(usage, modelId);
+      if (!cost) return null;
 
-      const missCost = ((usage.uncachedInputTokens || 0) * pricing.miss) / 1_000_000;
-      const hitCost = ((usage.cacheReadTokens || 0) * pricing.hit) / 1_000_000;
-      const outCost = ((usage.outputTokens || 0) * pricing.out) / 1_000_000;
-      const totalCost = missCost + hitCost + outCost;
-
-      const formatted = totalCost === 0 ? '$0.00' : totalCost < 0.01 ? '<$0.01' : '$' + totalCost.toFixed(2);
-      const title = `Estimated Spend: ${formatted}\nInput: $${missCost.toFixed(4)}\nCache Read: $${hitCost.toFixed(4)}\nOutput: $${outCost.toFixed(4)}`;
+      const formatted = formatCost(cost.totalCost);
+      const title = `Estimated Spend: ${formatted}\nInput: $${cost.missCost.toFixed(4)}\nCache Read: $${cost.hitCost.toFixed(4)}\nOutput: $${cost.outCost.toFixed(4)}`;
 
       return h('span', {
         'data-composer-stat': 'cost',
@@ -62,6 +76,11 @@ window.__ModuleLoader__.load({
           order: 2,
         }, CostPill));
       },
+      // Export internals for test runner
+      RATES,
+      calculateSessionCost,
+      formatCost,
+      CostPill,
     };
   },
 });
