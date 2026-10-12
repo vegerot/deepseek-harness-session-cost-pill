@@ -2,12 +2,12 @@ import React from 'react';
 import { calculateSessionCost, formatCost } from './cost.ts';
 import type { TokenUsage } from './cost.ts';
 
-export interface ModelSelectionProjection {
+export type ModelSelectionProjection = {
   lastUsed?: { model?: string } | null;
   next?: { model?: string } | null;
 }
 
-export interface CostPillProps {
+export type CostPillProps = {
   useProjection?: (key: string) => unknown;
 }
 
