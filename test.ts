@@ -18,7 +18,40 @@ const mockWindow: any = {
 
 await import('./client.js');
 
-const { RATES, calculateSessionCost, formatCost, CostPill } = pluginModule;
+const { RATES, calculateSessionCost, formatCost, CostPill, isPeak } = pluginModule;
+
+describe('isPeak', () => {
+  // Peak is 01:00-04:00 and 06:00-10:00 UTC, Monday-Friday. 2026-10-12 is a Monday.
+  const monday = (hour: number, minute = 0) => Date.UTC(2026, 9, 12, hour, minute);
+
+  it('is peak inside the 01:00-04:00 UTC window on a weekday', () => {
+    assert.equal(isPeak(monday(2)), true);
+  });
+
+  it('is peak inside the 06:00-10:00 UTC window on a weekday', () => {
+    assert.equal(isPeak(monday(7)), true);
+  });
+
+  it('is off-peak in the 04:00-06:00 UTC gap between windows', () => {
+    assert.equal(isPeak(monday(5)), false);
+  });
+
+  it('is off-peak just before the first window opens', () => {
+    assert.equal(isPeak(monday(0, 59)), false);
+  });
+
+  it('treats both window edges as exclusive at the end', () => {
+    assert.equal(isPeak(monday(1)), true);
+    assert.equal(isPeak(monday(4)), false);
+    assert.equal(isPeak(monday(6)), true);
+    assert.equal(isPeak(monday(10)), false);
+  });
+
+  it('is off-peak all weekend', () => {
+    assert.equal(isPeak(Date.UTC(2026, 9, 17, 2)), false); // Saturday
+    assert.equal(isPeak(Date.UTC(2026, 9, 18, 7)), false); // Sunday
+  });
+});
 
 describe('calculateSessionCost', () => {
   it('returns null when modelId is not present in RATES', () => {

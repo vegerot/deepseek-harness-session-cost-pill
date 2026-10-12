@@ -63,6 +63,7 @@
  * @property {string[]} inject
  * @property {(ctx: SlotContext) => void} apply
  * @property {Record<string, ModelRate>} RATES
+ * @property {(epochMs: number) => boolean} isPeak
  * @property {(usage: TokenUsage, modelId: string) => CostBreakdown | null} calculateSessionCost
  * @property {(amount: number) => string} formatCost
  * @property {(props: CostPillProps) => unknown} CostPill
@@ -93,6 +94,24 @@ shell.__ModuleLoader__.load({
       'deepseek-chat': { miss: 0.27, hit: 0.07, out: 1.10 },
       'deepseek-reasoner': { miss: 0.55, hit: 0.14, out: 2.19 },
     };
+
+    /**
+     * Whether one request's instant fell in DeepSeek's peak window: 01:00-04:00
+     * and 06:00-10:00 UTC, Monday through Friday.
+     *
+     * Chinese public holidays are off-peak in full, which this deliberately does
+     * not model — that needs a PRC holiday calendar, so weekday windows falling
+     * inside a holiday week are priced as peak.
+     * @param {number} epochMs
+     * @returns {boolean}
+     */
+    function isPeak(epochMs) {
+      const at = new Date(epochMs);
+      const weekday = at.getUTCDay();
+      if (weekday === 0 || weekday === 6) return false;
+      const hour = at.getUTCHours();
+      return (hour >= 1 && hour < 4) || (hour >= 6 && hour < 10);
+    }
 
     /**
      * Price one session's token totals at one model's route rate.
@@ -179,6 +198,7 @@ shell.__ModuleLoader__.load({
       },
       // Export internals for test runner
       RATES,
+      isPeak,
       calculateSessionCost,
       formatCost,
       CostPill,
