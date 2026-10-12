@@ -19,7 +19,21 @@ A DeepSeek Harness plugin that displays estimated API spend for the current sess
 pnpm test
 ```
 
-Runs tests using Node's native test runner with TypeScript support (`node --test test/*.test.ts`).
+Runs `tsc --noEmit` and then Node's native test runner. `pnpm typecheck` runs the type check alone.
+
+## Types without a build step
+
+`client.js` ships as plain JavaScript on purpose. The harness injects plugin bundles into the page as a
+**classic script** (`<script src>` with no `type="module"`), so the file reaches the JS engine verbatim — there is no
+build step and no runtime type stripping on the browser side.
+
+Types therefore live in **JSDoc annotations** (`@typedef` / `@param` / `@returns`), which `tsc --checkJs` verifies via
+`tsconfig.json`. This gives real, CI-visible type checking with no toolchain.
+
+`test.ts` is different: it runs under Node, which strips types natively, so it can use TypeScript syntax directly.
+
+Note that decorators and `enum` are *not* erasable, so they fail under Node's strip-only mode. Any future Host half
+needing a `@Remote`-decorated service must use the non-decorator registration route or a build step.
 
 ## Installation
 

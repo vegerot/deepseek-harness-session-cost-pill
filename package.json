@@ -29,7 +29,8 @@
     }
   },
   "scripts": {
-    "test": "node --test test.ts"
+    "test": "tsc --noEmit && node --test test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
