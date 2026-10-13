@@ -107,7 +107,7 @@
 const shell = /** @type {{ __ModuleLoader__: ModuleLoader }} */ (/** @type {any} */ (window));
 
 shell.__ModuleLoader__.load({
-  id: '@local/session-cost-pill',
+  id: 'dsh-plugin-session-cost-pill',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
