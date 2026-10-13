@@ -142,8 +142,11 @@ shell.__ModuleLoader__.load({
     // transcription of the source and cannot drift from a stale multiplier.
     // The retired deepseek-chat and deepseek-reasoner aliases are absent:
     // GET /models now returns only deepseek-flash and deepseek-v4-pro.
-    /** @type {Record<string, ModelRates>} */
-    const RATES = {
+    // The const assertion keeps every rate an exact literal, so a mistyped
+    // figure is visible in the type rather than silently widened to number, and
+    // satisfies checks the table's shape without widening that away.
+    /** @satisfies {Record<string, ModelRates>} */
+    const RATES = /** @type {const} */ ({
       'deepseek-flash': {
         offPeak: { hit: 0.003, miss: 0.15, out: 0.60 },
         peak: { hit: 0.006, miss: 0.30, out: 1.20 },
@@ -152,7 +155,19 @@ shell.__ModuleLoader__.load({
         offPeak: { hit: 0.022, miss: 0.66, out: 1.98 },
         peak: { hit: 0.044, miss: 1.32, out: 3.96 },
       },
-    };
+    });
+
+    /**
+     * One model's rates, by the id the app reports. This is the single place
+     * RATES is widened back: a const-asserted table has no index signature, and
+     * a session can name a model this build has never heard of, which is why
+     * the answer is nullable rather than a made-up rate.
+     * @param {string} modelId
+     * @returns {ModelRates | null}
+     */
+    function ratesFor(modelId) {
+      return /** @type {Record<string, ModelRates | undefined>} */ (RATES)[modelId] ?? null;
+    }
 
     /**
      * Whether one request's instant fell in DeepSeek's peak window: 01:00-04:00
@@ -183,7 +198,7 @@ shell.__ModuleLoader__.load({
      * @returns {CostBreakdown | null} null when the model has no configured rate.
      */
     function costOfUsage(usage, modelId, peak) {
-      const model = RATES[modelId];
+      const model = ratesFor(modelId);
       if (!model) return null;
       const pricing = peak ? model.peak : model.offPeak;
 
@@ -208,7 +223,7 @@ shell.__ModuleLoader__.load({
      * @returns {SessionCost | null} null when the model is unpriced or nothing billed.
      */
     function calculateSessionCost(nodes, modelId) {
-      if (!RATES[modelId]) return null;
+      if (!ratesFor(modelId)) return null;
 
       let missCost = 0;
       let hitCost = 0;
