@@ -270,22 +270,97 @@ describe('renderCostPill', () => {
   // breakdown, and the browser supplies Escape and light-dismiss for
   // popover="auto" without any listener of ours.
   it('wires the trigger button to the popover that holds the breakdown', () => {
-    const [trigger, popover] = render();
+    const [, trigger, popover] = render();
     assert.equal(trigger.type, 'button');
     assert.equal(trigger.props['data-composer-stat'], 'cost');
-    assert.equal(popover.type, 'div');
+    assert.equal(popover.type, 'section');
     assert.equal(popover.props.popover, 'auto');
     assert.equal(popover.props.id, 'cost-pill-1');
     assert.equal(trigger.props.popovertarget, popover.props.id);
   });
 
-  it('labels the trigger with the formatted total', () => {
-    const [trigger] = render();
-    assert.equal(trigger.props.children, '💸 $2.26');
+  it('names the trigger for assistive tech without hiding the figure', () => {
+    const [, trigger] = render();
+    assert.equal(trigger.props.children, '$2.26');
+    assert.match(trigger.props['aria-label'], /Estimated session spend \$2\.26/);
+    // aria-haspopup means "menu", and this opens a panel.
+    assert.equal(trigger.props['aria-haspopup'], undefined);
+  });
+
+  // The panel is a labelled section built from the elements that mean what it
+  // is doing, rather than from divs and spans wearing class names.
+  it('builds the panel from semantic elements', () => {
+    const [, , popover] = render();
+    const [header, rule, rows, note] = popover.props.children;
+    assert.equal(header.type, 'header');
+    assert.equal(rule.type, 'hr');
+    assert.equal(rows.type, 'dl');
+    assert.equal(note.type, 'p');
+
+    const [title, total] = header.props.children;
+    assert.equal(title.type, 'h2');
+    assert.equal(title.props.children, 'Estimated session spend');
+    assert.equal(popover.props['aria-labelledby'], title.props.id);
+
+    // The headline is a machine-readable figure, not just the rounded string.
+    assert.equal(total.type, 'data');
+    assert.equal(total.props.value, 2.259);
+    assert.equal(total.props.children, '$2.26');
+
+    // A dl may group a term with its value in a div, and only that.
+    for (const row of rows.props.children) {
+      assert.equal(row.type, 'div');
+      assert.deepEqual(row.props.children.map((child: any) => child.type), ['dt', 'dd']);
+    }
+  });
+
+  // The panel has to read as one of the composer dock's own menus, not as a
+  // bespoke popup: it wears the shared stat-dialog surface, driven by the same
+  // --dsw-* theme tokens the built-in Token usage panel uses, so it follows the
+  // user's light or dark theme instead of hardcoding one.
+  it('dresses the panel in the shared stat-dialog skin', () => {
+    const [sheet, trigger, popover] = render();
+    assert.equal(trigger.props.className, 'dsh-cost-pill');
+    assert.equal(popover.props.className, 'dsh-cost-panel');
+
+    const css: string = sheet.props.children;
+    assert.match(css, /background: var\(--dsw-specific-menu\)/);
+    assert.match(css, /box-shadow: var\(--dsw-elevation-prominent\)/);
+    assert.match(css, /border-radius: var\(--dsw-radius-lg\)/);
+    assert.match(css, /min-width: min\(18\.75rem, calc\(100vw - 1\.5rem\)\)/);
+    assert.match(css, /max-width: min\(27\.5rem, calc\(100vw - 1\.5rem\)\)/);
+    assert.match(css, /padding: 1rem/);
+    assert.match(css, /font-size: 0\.75rem/);
+
+    // The pill is the dock's pill too, hover affordance and all.
+    assert.match(css, /\.dsh-cost-pill:hover/);
+    assert.match(css, /var\(--dsw-alias-interactive-bg-hover\)/);
+    assert.match(css, /var\(--dsw-alias-label-tertiary\)/);
+
+    // Nothing bespoke is left: no hardcoded colour anywhere in the skin.
+    assert.doesNotMatch(css, /oklch|#[0-9a-f]{3,6}\b|rgb\(/i);
+  });
+
+  // Lengths follow the reader's text size. The only px left are the two with no
+  // content-relative equivalent: a pill radius and a device-pixel hairline.
+  it('sizes in rem, keeping px only for the radius and the hairlines', () => {
+    const [sheet] = render();
+    const css: string = sheet.props.children;
+    const px = css.match(/(?<![\w-])[\d.]+px/g) ?? [];
+    assert.deepEqual([...new Set(px)].sort(), ['0.5px', '9999px']);
+  });
+
+  // The only per-instance style is the anchor pair that ties this panel to this
+  // pill, so two cost pills can never position against each other.
+  it('carries no inline theming, only the per-instance anchor', () => {
+    const [, , popover] = render();
+    assert.deepEqual(Object.keys(popover.props.style).sort(), ['anchorName', 'positionAnchor']);
+    assert.equal(popover.props.style.anchorName, '--cost-pill-1');
+    assert.equal(popover.props.style.positionAnchor, '--cost-pill-1');
   });
 
   it('breaks the total down by cost bucket', () => {
-    const [, popover] = render();
+    const [, , popover] = render();
     const rows = rowsOf(popover);
     assert.equal(rows['uncached-input'].value, '$0.4500');
     assert.equal(rows['cache-read'].value, '$0.0090');
@@ -293,7 +368,7 @@ describe('renderCostPill', () => {
   });
 
   it('reports the peak and off-peak split with step counts', () => {
-    const [, popover] = render();
+    const [, , popover] = render();
     const rows = rowsOf(popover);
     assert.equal(rows['peak'].value, '$1.5060');
     assert.equal(rows['off-peak'].value, '$0.7530');
@@ -302,15 +377,8 @@ describe('renderCostPill', () => {
   });
 
   it('names the model whose rates produced the total', () => {
-    const [, popover] = render();
+    const [, , popover] = render();
     assert.match(JSON.stringify(popover), /deepseek-flash/);
-  });
-
-  it('keeps the pill styling and stays a single trigger', () => {
-    const [trigger] = render();
-    assert.match(trigger.props.style.background, /oklch/);
-    assert.match(trigger.props.style.border, /oklch/);
-    assert.equal(trigger.props.style.gap, '0.35rem');
   });
 });
 

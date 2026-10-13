@@ -274,76 +274,124 @@ shell.__ModuleLoader__.load({
       return '$' + amount.toFixed(4);
     }
 
-    // The trigger keeps the pill skin the dock already uses, but is a button:
-    // the click is what opens the breakdown.
-    const TRIGGER_STYLE = {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '0.35rem',
-      font: 'inherit',
-      fontSize: '0.75rem',
-      lineHeight: '1.25rem',
-      padding: '0.125rem 0.5rem',
-      borderRadius: '9999px',
-      border: '1px solid oklch(0.6 0.02 240 / 0.25)',
-      background: 'oklch(0.6 0.02 240 / 0.08)',
-      color: 'inherit',
-      cursor: 'pointer',
-      userSelect: 'none',
-    };
+    // The pill and its panel wear the composer dock's own skin. The pill
+    // mirrors StatsPills.module.css and the panel mirrors stat-dialog.module.css
+    // — the surface the built-in Token usage panel opens — through the same
+    // --dsw-* tokens, so the row reads as one family in either theme.
+    //
+    // A style element rather than inline styles for two reasons: the hover
+    // state needs a selector, and React removes the rules with the pill when it
+    // unmounts.
+    const PILL_CSS = `
+/* Sizes are rem so they follow the reader's text size; the two px values are
+   the cases with no content-relative equivalent — a pill radius and a
+   device-pixel hairline rule. */
 
-    // The popover sits above its anchor. Browsers without CSS anchor
-    // positioning drop the anchor properties and the UA's own
-    // `inset: 0; margin: auto` centring still applies — which is why the gap is
-    // a translate rather than a margin, since a margin here would override that
-    // centring and strand the panel in the corner.
-    const PANEL_STYLE = {
-      position: 'fixed',
-      positionArea: 'top',
-      justifySelf: 'center',
-      translate: '0 -0.5rem',
-      minWidth: '16rem',
-      padding: '0.625rem 0.75rem',
-      borderRadius: '0.75rem',
-      border: '1px solid oklch(0.6 0.02 240 / 0.25)',
-      background: 'oklch(0.24 0.012 240)',
-      color: 'oklch(0.97 0.005 240)',
-      boxShadow: '0 0.75rem 2rem oklch(0 0 0 / 0.35)',
-      fontFamily: 'inherit',
-      fontSize: '0.75rem',
-    };
-
-    const TITLE_STYLE = {
-      display: 'flex',
-      alignItems: 'baseline',
-      justifyContent: 'space-between',
-      gap: '1rem',
-    };
-
-    const TOTAL_STYLE = { fontVariantNumeric: 'tabular-nums', fontWeight: 600 };
-
-    const LIST_STYLE = {
-      display: 'grid',
-      gridTemplateColumns: '1fr auto',
-      gap: '0.125rem 1rem',
-      margin: 0,
-      paddingTop: '0.375rem',
-      borderTop: '1px solid oklch(0.6 0.02 240 / 0.25)',
-    };
-
-    // Purely a grouping for assistive tech; the dt/dd pair stays a grid item.
-    const ROW_STYLE = { display: 'contents' };
-
-    const LABEL_STYLE = { opacity: 0.75 };
-
-    const VALUE_STYLE = { margin: 0, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
-
-    const NOTE_STYLE = {
-      marginTop: '0.125rem',
-      paddingTop: '0.375rem',
-      borderTop: '1px solid oklch(0.6 0.02 240 / 0.25)',
-      opacity: 0.6,
-    };
+.dsh-cost-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0.0625rem 0.5rem;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* The pill's glyph, kept out of the markup: aria-label supplies the button's
+   accessible name, so nothing here has to be hidden from assistive tech. */
+.dsh-cost-pill::before {
+  content: '💸';
+  font-size: 0.875rem;
+  line-height: 1;
+}
+.dsh-cost-pill:hover,
+.dsh-cost-pill:has(~ [popover]:popover-open) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+.dsh-cost-panel {
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  /* Above the pill and centred on it. A browser without CSS anchor positioning
+     drops these three declarations and the user agent's own inset/margin
+     centring stands in, which is why the gap is a translate: a margin here
+     would override that centring and strand the panel in a corner. */
+  position-area: top;
+  justify-self: center;
+  translate: 0 -0.5rem;
+  width: max-content;
+  min-width: min(18.75rem, calc(100vw - 1.5rem));
+  max-width: min(27.5rem, calc(100vw - 1.5rem));
+  padding: 1rem;
+  border: 0;
+  overflow: visible;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-backdrop-filter);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  font-size: 0.75rem;
+  line-height: 1.125rem;
+  color: var(--dsw-alias-label-secondary);
+  cursor: default;
+}
+.dsh-cost-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+.dsh-cost-panel-title {
+  margin: 0;
+  font: inherit;
+}
+.dsh-cost-panel-total {
+  font-variant-numeric: tabular-nums;
+}
+.dsh-cost-panel-rule {
+  margin: 0 0 0.625rem;
+  border: 0;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+.dsh-cost-panel-rows {
+  display: grid;
+  grid-template-columns: minmax(4.75rem, auto) minmax(0, 1fr);
+  gap: 0.375rem 1rem;
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* The spec's own way to group a term with its value, so the dt/dd pair stays
+   one grid item without introducing a styling-only wrapper. */
+.dsh-cost-panel-rows > div {
+  display: contents;
+}
+.dsh-cost-panel-rows dt,
+.dsh-cost-panel-rows dd {
+  min-width: 0;
+  margin: 0;
+}
+.dsh-cost-panel-rows dd {
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.dsh-cost-panel-note {
+  margin: 0.625rem 0 0;
+  padding-top: 0.625rem;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+}
+`;
 
     /**
      * How many billable steps a rate band covered.
@@ -363,9 +411,9 @@ shell.__ModuleLoader__.load({
      * @returns {any}
      */
     function costRow(key, label, value) {
-      return h('div', { key, 'data-cost-row': key, style: ROW_STYLE }, [
-        h('dt', { key: 'label', style: LABEL_STYLE }, label),
-        h('dd', { key: 'value', style: VALUE_STYLE }, value),
+      return h('div', { key, 'data-cost-row': key }, [
+        h('dt', { key: 'label' }, label),
+        h('dd', { key: 'value' }, value),
       ]);
     }
 
@@ -377,43 +425,54 @@ shell.__ModuleLoader__.load({
      * click, and paints it in the top layer so the dock cannot clip it — no
      * state, refs, effects, or listeners of ours are involved.
      * @param {{ id: string, breakdown: SessionCost, modelId: string }} input
-     * @returns {any[]} the trigger, then the popover it targets.
+     * @returns {any[]} the stylesheet, the trigger, then the popover it targets.
      */
     function renderCostPill({ id, breakdown, modelId }) {
       const anchor = '--' + id;
+      const titleId = id + '-title';
+      const total = formatCost(breakdown.totalCost);
 
+      // The button carries only the figure: PILL_CSS generates the glyph, and
+      // aria-label gives the button a name worth announcing. There is no
+      // aria-haspopup because that means "menu" and this opens a panel.
       const trigger = h('button', {
         key: 'trigger',
         type: 'button',
+        className: 'dsh-cost-pill',
         'data-composer-stat': 'cost',
         popovertarget: id,
-        'aria-haspopup': 'true',
+        'aria-label': 'Estimated session spend ' + total + '. Show the breakdown.',
         title: 'Show the cost breakdown',
-        style: TRIGGER_STYLE,
-      }, '💸 ' + formatCost(breakdown.totalCost));
+      }, total);
 
-      const popover = h('div', {
+      // Only the two anchor properties are per-instance; the skin is PILL_CSS.
+      // The trigger precedes the popover so the pill can pick up the panel's
+      // open state through :has().
+      const popover = h('section', {
         key: 'breakdown',
         id,
         popover: 'auto',
+        className: 'dsh-cost-panel',
         'data-cost-breakdown': '',
-        style: { ...PANEL_STYLE, anchorName: anchor, positionAnchor: anchor },
+        'aria-labelledby': titleId,
+        style: { anchorName: anchor, positionAnchor: anchor },
       }, [
-        h('div', { key: 'title', style: TITLE_STYLE }, [
-          h('span', { key: 'label' }, 'Estimated session spend'),
-          h('span', { key: 'total', style: TOTAL_STYLE }, formatCost(breakdown.totalCost)),
+        h('header', { key: 'header', className: 'dsh-cost-panel-header' }, [
+          h('h2', { key: 'title', id: titleId, className: 'dsh-cost-panel-title' }, 'Estimated session spend'),
+          h('data', { key: 'total', className: 'dsh-cost-panel-total', value: breakdown.totalCost }, total),
         ]),
-        h('dl', { key: 'rows', style: LIST_STYLE }, [
+        h('hr', { key: 'rule', className: 'dsh-cost-panel-rule' }),
+        h('dl', { key: 'rows', className: 'dsh-cost-panel-rows' }, [
           costRow('uncached-input', 'Uncached input', formatExactCost(breakdown.missCost)),
           costRow('cache-read', 'Cache read', formatExactCost(breakdown.hitCost)),
           costRow('output', 'Output', formatExactCost(breakdown.outCost)),
           costRow('peak', 'Peak (' + stepCount(breakdown.peakSteps) + ')', formatExactCost(breakdown.peakCost)),
           costRow('off-peak', 'Off-peak (' + stepCount(breakdown.offPeakSteps) + ')', formatExactCost(breakdown.offPeakCost)),
         ]),
-        h('div', { key: 'note', style: NOTE_STYLE }, 'Priced per request at ' + modelId + ' rates'),
+        h('p', { key: 'note', className: 'dsh-cost-panel-note' }, 'Priced per request at ' + modelId + ' rates'),
       ]);
 
-      return [trigger, popover];
+      return [h('style', { key: 'sheet' }, PILL_CSS), trigger, popover];
     }
 
     /**
