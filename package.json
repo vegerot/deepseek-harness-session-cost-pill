@@ -18,7 +18,6 @@
     "url": "git+https://github.com/vegerot/deepseek-harness-session-cost-pill.git"
   },
   "homepage": "https://github.com/vegerot/deepseek-harness-session-cost-pill#readme",
-  "private": true,
   "exports": {
     ".": "./index.js",
     "./package.json": "./package.json",

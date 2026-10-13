@@ -2,7 +2,7 @@
 
 **Live session spend, right in the composer dock.**
 
-![Session cost pill in the DeepSeek Harness composer dock](docs/pill-in-dock.png)
+![Session cost pill in the DeepSeek Harness composer dock](https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/pill-in-dock.png)
 
 [![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 ![tests](https://img.shields.io/badge/tests-24_passing-2ea44f?style=flat-square)
@@ -28,10 +28,10 @@ The composer dock already tracks turns, speed, tokens, and context. The cost pil
 Hover it for the exact breakdown — uncached input, cache reads, and output, each priced separately.
 
 <p align="center">
-  <img src="docs/pill-cost.png" alt="The cost pill" width="330">
+  <img src="https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/pill-cost.png" alt="The cost pill" width="330">
 </p>
 
-![Full window with the pill running](docs/session-window.png)
+![Full window with the pill running](https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/session-window.png)
 
 ---
 
