@@ -25,6 +25,12 @@ The composer dock already tracks turns, speed, tokens, and context. The cost pil
 | **💸 cost** | **estimated spend for this session** |
 | 🪫 context | context-window pressure |
 
+The glyph climbs with the session total, so the row reads at a glance before the number does:
+
+| 💸 | 💵 | 💰 | 🔥 | 🚨 |
+|---|---|---|---|---|
+| under $1 | under $5 | under $20 | under $100 | $100 and up |
+
 **Click it** and the breakdown opens: uncached input, cache reads, and output, each priced separately, plus how much
 of the total was charged at peak rates and how many steps that covered. It closes on Escape, on a click outside, or on
 a second click — the browser's own popover behaviour, so the plugin ships no dialog state, listeners, or positioning

@@ -113,9 +113,10 @@
  * @property {(nodes: readonly AssistantStep[], modelId: string) => SessionCost | null} calculateSessionCost
  * @property {(amount: number) => string} formatCost
  * @property {(amount: number) => string} formatExactCost
+ * @property {(totalCost: number) => string} glyphFor
  * @property {(props: CostPillProps) => CostView | null} costView
- * @property {(input: { id: string, breakdown: SessionCost, modelId: string }) => any[]} renderCostPill
- * @property {(props: CostPillProps) => unknown} CostPill
+ * @property {(input: { id: string, breakdown: SessionCost, modelId: string }) => import('react').ReactElement[]} renderCostPill
+ * @property {(props: CostPillProps) => import('react').ReactNode} CostPill
  */
 
 /**
@@ -123,17 +124,20 @@
  * blocking head script before any bundle loads, so it is present by
  * construction and needs no guard.
  * @typedef {object} ModuleLoader
- * @property {(registration: { id: string, factory: (require: (name: string) => any) => PluginModule }) => void} load
+ * @property {(registration: { id: string, factory: (require: (name: string) => unknown) => PluginModule }) => void} load
  */
 
 // `window` is augmented by the shell at boot, so assert the one shape this
 // bundle reads rather than declaring the global for the whole page.
-const shell = /** @type {{ __ModuleLoader__: ModuleLoader }} */ (/** @type {any} */ (window));
+const shell = /** @type {{ __ModuleLoader__: ModuleLoader }} */ (/** @type {unknown} */ (window));
 
 shell.__ModuleLoader__.load({
   id: 'dsh-plugin-session-cost-pill',
   factory(require) {
-    const React = require('react');
+    // Typed from the real react types rather than left as the module table's
+    // any: createElement then returns an element, which is what lets the helpers
+    // below annotate themselves honestly instead of claiming unknown.
+    const React = /** @type {typeof import('react')} */ (require('react'));
     const h = React.createElement;
 
     // DeepSeek published list prices, USD per 1M tokens, transcribed from
@@ -167,6 +171,31 @@ shell.__ModuleLoader__.load({
      */
     function ratesFor(modelId) {
       return /** @type {Record<string, ModelRates | undefined>} */ (RATES)[modelId] ?? null;
+    }
+
+    // The pill's glyph climbs with the session total, so the dock row reads
+    // "cheap" or "that one hurt" before the number is. Each entry is the ceiling
+    // of the glyph beside it; anything past the last ceiling is the alarm, which
+    // is why the list carries no open-ended final band.
+    /** @satisfies {readonly { max: number, glyph: string }[]} */
+    const GLYPH_BANDS = /** @type {const} */ ([
+      { max: 1, glyph: '💸' },
+      { max: 5, glyph: '💵' },
+      { max: 20, glyph: '💰' },
+      { max: 100, glyph: '🔥' },
+    ]);
+
+    /**
+     * The glyph for a session total: the first band it has not passed, or the
+     * alarm past every ceiling.
+     * @param {number} totalCost
+     * @returns {string}
+     */
+    function glyphFor(totalCost) {
+      for (const band of GLYPH_BANDS) {
+        if (totalCost < band.max) return band.glyph;
+      }
+      return '🚨';
     }
 
     /**
@@ -298,9 +327,13 @@ shell.__ModuleLoader__.load({
     // state needs a selector, and React removes the rules with the pill when it
     // unmounts.
     const PILL_CSS = `
-/* Sizes are rem so they follow the reader's text size; the two px values are
-   the cases with no content-relative equivalent — a pill radius and a
-   device-pixel hairline rule. */
+/* Sizes are rem so they follow the reader's text size. px survives only where
+   the theme's own scale is in px — the dock's font formula, the two hairlines,
+   and a pill radius — because rewriting those in rem would drift from the
+   built-in pills rather than match them.
+   Nested rules are relative to the block that owns them, which is why the
+   panel's elements need no class names of their own: the markup says what each
+   element is and these say how the panel dresses it. */
 
 .dsh-cost-pill {
   display: inline-flex;
@@ -313,24 +346,36 @@ shell.__ModuleLoader__.load({
   border-radius: 9999px;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
+  /* font: inherit is what clears the user agent's own button font, so it has to
+     come first; the two lines after it then pull the size back to the dock's
+     scale. Inheriting alone lands on the 16px page default — the built-in pills
+     take their size from an anchor wrapper inside their component, which this
+     pill has no equivalent of — and that is what made this one render a third
+     larger than its neighbours. */
   font: inherit;
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
   font-variant-numeric: tabular-nums;
-  line-height: inherit;
   white-space: nowrap;
   cursor: pointer;
+
+  /* The glyph, kept out of the markup: aria-label supplies the accessible name,
+     so nothing here has to be hidden from assistive tech. The trigger hands the
+     character over as a custom property, so which band it landed in is decided
+     in JS while the presentation stays here. */
+  &::before {
+    content: var(--dsh-cost-glyph);
+    font-size: 0.875rem;
+    line-height: 1;
+  }
+
+  &:hover,
+  &:has(~ [popover]:popover-open) {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-secondary);
+  }
 }
-/* The pill's glyph, kept out of the markup: aria-label supplies the button's
-   accessible name, so nothing here has to be hidden from assistive tech. */
-.dsh-cost-pill::before {
-  content: '💸';
-  font-size: 0.875rem;
-  line-height: 1;
-}
-.dsh-cost-pill:hover,
-.dsh-cost-pill:has(~ [popover]:popover-open) {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-secondary);
-}
+
 .dsh-cost-panel {
   position: fixed;
   z-index: 1100;
@@ -365,54 +410,66 @@ shell.__ModuleLoader__.load({
   line-height: 1.125rem;
   color: var(--dsw-alias-label-secondary);
   cursor: default;
-}
-.dsh-cost-panel-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
-  color: var(--dsw-alias-label-primary);
-  font-weight: 500;
-}
-.dsh-cost-panel-title {
-  margin: 0;
-  font: inherit;
-}
-.dsh-cost-panel-total {
-  font-variant-numeric: tabular-nums;
-}
-.dsh-cost-panel-rule {
-  margin: 0 0 0.625rem;
-  border: 0;
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-}
-.dsh-cost-panel-rows {
-  display: grid;
-  grid-template-columns: minmax(4.75rem, auto) minmax(0, 1fr);
-  gap: 0.375rem 1rem;
-  margin: 0;
-  color: var(--dsw-alias-label-tertiary);
-}
-/* The spec's own way to group a term with its value, so the dt/dd pair stays
-   one grid item without introducing a styling-only wrapper. */
-.dsh-cost-panel-rows > div {
-  display: contents;
-}
-.dsh-cost-panel-rows dt,
-.dsh-cost-panel-rows dd {
-  min-width: 0;
-  margin: 0;
-}
-.dsh-cost-panel-rows dd {
-  color: var(--dsw-alias-label-secondary);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-.dsh-cost-panel-note {
-  margin: 0.625rem 0 0;
-  padding-top: 0.625rem;
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-  color: var(--dsw-alias-label-tertiary);
+
+  /* Heading row: the section name left, its headline figure right. */
+  & header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--dsw-alias-label-primary);
+    font-weight: 500;
+  }
+
+  & h2 {
+    margin: 0;
+    font: inherit;
+  }
+
+  /* The headline is a machine-readable figure, so it needs no class of its own
+     to be tabular. */
+  & data {
+    font-variant-numeric: tabular-nums;
+  }
+
+  & hr {
+    margin: 0 0 0.625rem;
+    border: 0;
+    border-top: 0.5px solid var(--dsw-alias-border-l2);
+  }
+
+  & dl {
+    display: grid;
+    grid-template-columns: minmax(4.75rem, auto) minmax(0, 1fr);
+    gap: 0.375rem 1rem;
+    margin: 0;
+    color: var(--dsw-alias-label-tertiary);
+  }
+
+  /* The spec's own way to group a term with its value, so the dt/dd pair stays
+     one grid item without introducing a styling-only wrapper. */
+  & dl > div {
+    display: contents;
+  }
+
+  & dt,
+  & dd {
+    min-width: 0;
+    margin: 0;
+  }
+
+  & dd {
+    color: var(--dsw-alias-label-secondary);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  & p {
+    margin: 0.625rem 0 0;
+    padding-top: 0.625rem;
+    border-top: 0.5px solid var(--dsw-alias-border-l2);
+    color: var(--dsw-alias-label-tertiary);
+  }
 }
 `;
 
@@ -431,7 +488,7 @@ shell.__ModuleLoader__.load({
      * @param {string} key
      * @param {string} label
      * @param {string} value
-     * @returns {any}
+     * @returns {import('react').ReactElement}
      */
     function costRow(key, label, value) {
       return h('div', { key, 'data-cost-row': key }, [
@@ -448,7 +505,7 @@ shell.__ModuleLoader__.load({
      * click, and paints it in the top layer so the dock cannot clip it — no
      * state, refs, effects, or listeners of ours are involved.
      * @param {{ id: string, breakdown: SessionCost, modelId: string }} input
-     * @returns {any[]} the stylesheet, the trigger, then the popover it targets.
+     * @returns {import('react').ReactElement[]} the stylesheet, the trigger, then the popover.
      */
     function renderCostPill({ id, breakdown, modelId }) {
       const anchor = '--' + id;
@@ -467,8 +524,10 @@ shell.__ModuleLoader__.load({
         'aria-label': 'Estimated session spend ' + total + '. Show the breakdown.',
         title: 'Show the cost breakdown',
         // The button is what the panel positions against, so the anchor name
-        // belongs here and the reference belongs on the panel.
-        style: { anchorName: anchor },
+        // belongs here and the reference belongs on the panel. The glyph rides
+        // along as the custom property the stylesheet's ::before reads, already
+        // JSON-quoted because content: needs a string.
+        style: { anchorName: anchor, '--dsh-cost-glyph': JSON.stringify(glyphFor(breakdown.totalCost)) },
       }, total);
 
       // Only the anchor pair is per-instance; the skin is PILL_CSS. The
@@ -483,19 +542,19 @@ shell.__ModuleLoader__.load({
         'aria-labelledby': titleId,
         style: { positionAnchor: anchor },
       }, [
-        h('header', { key: 'header', className: 'dsh-cost-panel-header' }, [
-          h('h2', { key: 'title', id: titleId, className: 'dsh-cost-panel-title' }, 'Estimated session spend'),
-          h('data', { key: 'total', className: 'dsh-cost-panel-total', value: breakdown.totalCost }, total),
+        h('header', { key: 'header' }, [
+          h('h2', { key: 'title', id: titleId }, 'Estimated session spend'),
+          h('data', { key: 'total', value: breakdown.totalCost }, total),
         ]),
-        h('hr', { key: 'rule', className: 'dsh-cost-panel-rule' }),
-        h('dl', { key: 'rows', className: 'dsh-cost-panel-rows' }, [
+        h('hr', { key: 'rule' }),
+        h('dl', { key: 'rows' }, [
           costRow('uncached-input', 'Uncached input', formatExactCost(breakdown.missCost)),
           costRow('cache-read', 'Cache read', formatExactCost(breakdown.hitCost)),
           costRow('output', 'Output', formatExactCost(breakdown.outCost)),
           costRow('peak', 'Peak (' + stepCount(breakdown.peakSteps) + ')', formatExactCost(breakdown.peakCost)),
           costRow('off-peak', 'Off-peak (' + stepCount(breakdown.offPeakSteps) + ')', formatExactCost(breakdown.offPeakCost)),
         ]),
-        h('p', { key: 'note', className: 'dsh-cost-panel-note' }, 'Priced per request at ' + modelId + ' rates'),
+        h('p', { key: 'note' }, 'Priced per request at ' + modelId + ' rates'),
       ]);
 
       return [h('style', { key: 'sheet' }, PILL_CSS), trigger, popover];
@@ -527,7 +586,7 @@ shell.__ModuleLoader__.load({
      * configured rate. The id comes from useId so two composers cannot target
      * each other's breakdown.
      * @param {CostPillProps} props
-     * @returns {unknown}
+     * @returns {import('react').ReactNode}
      */
     function CostPill(props) {
       const id = 'cost-pill-' + React.useId().replace(/[^a-zA-Z0-9]/g, '');
@@ -552,6 +611,7 @@ shell.__ModuleLoader__.load({
       calculateSessionCost,
       formatCost,
       formatExactCost,
+      glyphFor,
       costView,
       renderCostPill,
       CostPill,
