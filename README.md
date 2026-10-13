@@ -5,7 +5,7 @@
 ![Session cost pill in the DeepSeek Harness composer dock](https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/pill-in-dock.png)
 
 [![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
-![tests](https://img.shields.io/badge/tests-24_passing-2ea44f?style=flat-square)
+![tests](https://img.shields.io/badge/tests-33_passing-2ea44f?style=flat-square)
 ![build](https://img.shields.io/badge/build-none_required-4D6BFE?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 
@@ -25,7 +25,10 @@ The composer dock already tracks turns, speed, tokens, and context. The cost pil
 | **💸 cost** | **estimated spend for this session** |
 | 🪫 context | context-window pressure |
 
-Hover it for the exact breakdown — uncached input, cache reads, and output, each priced separately.
+**Click it** and the breakdown opens: uncached input, cache reads, and output, each priced separately, plus how much
+of the total was charged at peak rates and how many steps that covered. It closes on Escape, on a click outside, or on
+a second click — the browser's own popover behaviour, so the plugin ships no dialog state, listeners, or positioning
+code of its own.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/pill-cost.png" alt="The cost pill" width="330">

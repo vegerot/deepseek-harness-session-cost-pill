@@ -18,7 +18,10 @@ const mockWindow: any = {
 
 await import('./client.js');
 
-const { RATES, costOfUsage, calculateSessionCost, formatCost, CostPill, isPeak } = pluginModule;
+const {
+  RATES, costOfUsage, calculateSessionCost, formatCost, formatExactCost,
+  costView, renderCostPill, isPeak,
+} = pluginModule;
 
 describe('isPeak', () => {
   // Peak is 01:00-04:00 and 06:00-10:00 UTC, Monday-Friday. 2026-10-12 is a Monday.
@@ -147,6 +150,29 @@ describe('calculateSessionCost', () => {
   it('returns null when the model has no configured rate', () => {
     assert.equal(calculateSessionCost([step(OFF_PEAK_AT, millionEach)], 'unknown-model'), null);
   });
+
+  // The peak/off-peak split is what makes the total explainable: the same
+  // tokens cost double inside a peak window.
+  it('splits the total by peak and off-peak pricing, with step counts', () => {
+    const result = calculateSessionCost(
+      [step(OFF_PEAK_AT, millionEach), step(PEAK_AT, millionEach)],
+      'deepseek-flash',
+    );
+    assert.notEqual(result, null);
+    close(result!.offPeakCost, 0.753);
+    close(result!.peakCost, 1.506);
+    assert.equal(result!.offPeakSteps, 1);
+    assert.equal(result!.peakSteps, 1);
+    close(result!.peakCost + result!.offPeakCost, result!.totalCost);
+  });
+});
+
+describe('formatExactCost', () => {
+  it('keeps four decimals so a small bucket stays visible', () => {
+    assert.equal(formatExactCost(0.009), '$0.0090');
+    assert.equal(formatExactCost(1.8), '$1.8000');
+    assert.equal(formatExactCost(0), '$0.0000');
+  });
 });
 
 describe('formatCost', () => {
@@ -164,22 +190,22 @@ describe('formatCost', () => {
   });
 });
 
-describe('CostPill', () => {
-  const modelIs = (model: string) => (key: string) =>
-    key === 'modelSelection' ? { lastUsed: { model } } : undefined;
-  const chatWith = (nodes: readonly unknown[]) =>
-    (selector: (snapshot: unknown) => unknown) => selector({ legacy: { nodes } });
+const modelIs = (model: string) => (key: string) =>
+  key === 'modelSelection' ? { lastUsed: { model } } : undefined;
+const chatWith = (nodes: readonly unknown[]) =>
+  (selector: (snapshot: unknown) => unknown) => selector({ legacy: { nodes } });
 
+describe('costView', () => {
   it('returns null without the session standard kit', () => {
-    assert.equal(CostPill({}), null);
-    assert.equal(CostPill({ useProjection: modelIs('deepseek-flash') }), null);
-    assert.equal(CostPill({ useChat: chatWith([]) }), null);
+    assert.equal(costView({}), null);
+    assert.equal(costView({ useProjection: modelIs('deepseek-flash') }), null);
+    assert.equal(costView({ useChat: chatWith([]) }), null);
   });
 
   it('returns null when no step billed anything', () => {
-    assert.equal(CostPill({ useProjection: modelIs('deepseek-flash'), useChat: chatWith([]) }), null);
+    assert.equal(costView({ useProjection: modelIs('deepseek-flash'), useChat: chatWith([]) }), null);
     assert.equal(
-      CostPill({
+      costView({
         useProjection: modelIs('deepseek-flash'),
         useChat: chatWith([step(OFF_PEAK_AT, { uncachedInputTokens: 0, cacheReadTokens: 0, outputTokens: 0 })]),
       }),
@@ -188,31 +214,103 @@ describe('CostPill', () => {
   });
 
   it('returns null when the model has no configured rate', () => {
-    const element = CostPill({
-      useProjection: modelIs('unknown-model'),
-      useChat: chatWith([step(OFF_PEAK_AT, millionEach)]),
-    });
-    assert.equal(element, null);
+    assert.equal(
+      costView({ useProjection: modelIs('unknown-model'), useChat: chatWith([step(OFF_PEAK_AT, millionEach)]) }),
+      null,
+    );
   });
 
-  // End-to-end proof of per-request pricing: one off-peak and one peak step,
-  // summed at their own rates (0.009 + 0.45 + 1.80 = 2.259).
-  it('renders spend priced per step, with semantic styling and a breakdown', () => {
-    const element = CostPill({
+  // End-to-end proof of per-request pricing through the real data path: one
+  // off-peak and one peak step, summed at their own rates.
+  it('prices the session the projections describe', () => {
+    const view = costView({
       useProjection: modelIs('deepseek-flash'),
       useChat: chatWith([step(OFF_PEAK_AT, millionEach), step(PEAK_AT, millionEach)]),
     });
-    assert.notEqual(element, null);
-    assert.equal(element!.type, 'span');
-    assert.equal(element!.props['data-composer-stat'], 'cost');
-    assert.equal(element!.props.children, '💸 $2.26');
-    assert.match(element!.props.title, /Estimated Spend: \$2\.26/);
-    assert.match(element!.props.title, /Input: \$0\.4500/);
-    assert.match(element!.props.title, /Cache Read: \$0\.0090/);
-    assert.match(element!.props.title, /Output: \$1\.8000/);
-    assert.match(element!.props.style.background, /oklch/);
-    assert.match(element!.props.style.border, /oklch/);
-    assert.equal(element!.props.style.gap, '0.35rem');
+    assert.notEqual(view, null);
+    assert.equal(view!.modelId, 'deepseek-flash');
+    assert.ok(Math.abs(view!.breakdown.totalCost - 2.259) < 1e-9);
+  });
+
+  it('falls back to the queued model when no request has run yet', () => {
+    const view = costView({
+      useProjection: (key: string) => (key === 'modelSelection' ? { lastUsed: null, next: { model: 'deepseek-v4-pro' } } : undefined),
+      useChat: chatWith([step(OFF_PEAK_AT, millionEach)]),
+    });
+    assert.notEqual(view, null);
+    assert.equal(view!.modelId, 'deepseek-v4-pro');
+  });
+});
+
+describe('renderCostPill', () => {
+  const breakdown = {
+    missCost: 0.45, hitCost: 0.009, outCost: 1.8, totalCost: 2.259,
+    peakCost: 1.506, offPeakCost: 0.753, peakSteps: 1, offPeakSteps: 2,
+  };
+  const render = (b = breakdown, modelId = 'deepseek-flash') =>
+    renderCostPill({ id: 'cost-pill-1', breakdown: b, modelId });
+
+  /** Collect every `data-cost-row` as { label, value } from a rendered tree. */
+  const rowsOf = (element: unknown) => {
+    const rows: Record<string, { label: string; value: string }> = {};
+    const walk = (node: any) => {
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      if (!node || typeof node !== 'object') return;
+      if (node.props?.['data-cost-row'] !== undefined) {
+        const [dt, dd] = node.props.children;
+        rows[node.props['data-cost-row']] = { label: dt.props.children, value: dd.props.children };
+      }
+      walk(node.props?.children);
+    };
+    walk(element);
+    return rows;
+  };
+
+  // The click contract: the trigger opens exactly the popover that holds the
+  // breakdown, and the browser supplies Escape and light-dismiss for
+  // popover="auto" without any listener of ours.
+  it('wires the trigger button to the popover that holds the breakdown', () => {
+    const [trigger, popover] = render();
+    assert.equal(trigger.type, 'button');
+    assert.equal(trigger.props['data-composer-stat'], 'cost');
+    assert.equal(popover.type, 'div');
+    assert.equal(popover.props.popover, 'auto');
+    assert.equal(popover.props.id, 'cost-pill-1');
+    assert.equal(trigger.props.popovertarget, popover.props.id);
+  });
+
+  it('labels the trigger with the formatted total', () => {
+    const [trigger] = render();
+    assert.equal(trigger.props.children, '💸 $2.26');
+  });
+
+  it('breaks the total down by cost bucket', () => {
+    const [, popover] = render();
+    const rows = rowsOf(popover);
+    assert.equal(rows['uncached-input'].value, '$0.4500');
+    assert.equal(rows['cache-read'].value, '$0.0090');
+    assert.equal(rows['output'].value, '$1.8000');
+  });
+
+  it('reports the peak and off-peak split with step counts', () => {
+    const [, popover] = render();
+    const rows = rowsOf(popover);
+    assert.equal(rows['peak'].value, '$1.5060');
+    assert.equal(rows['off-peak'].value, '$0.7530');
+    assert.match(rows['peak'].label, /1 step/);
+    assert.match(rows['off-peak'].label, /2 steps/);
+  });
+
+  it('names the model whose rates produced the total', () => {
+    const [, popover] = render();
+    assert.match(JSON.stringify(popover), /deepseek-flash/);
+  });
+
+  it('keeps the pill styling and stays a single trigger', () => {
+    const [trigger] = render();
+    assert.match(trigger.props.style.background, /oklch/);
+    assert.match(trigger.props.style.border, /oklch/);
+    assert.equal(trigger.props.style.gap, '0.35rem');
   });
 });
 

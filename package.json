@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-session-cost-pill",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Live session spend in the DeepSeek Harness composer dock, pricing every assistant step at DeepSeek's peak or off-peak rate for its own timestamp.",
   "type": "module",
   "license": "MIT",
@@ -50,8 +50,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "@types/react": "^19.3.0",
-    "react": "^19.3.0",
+    "@types/react": "^18.3.1",
+    "react": "^18.3.1",
     "typescript": "^7.0.2"
   }
 }
