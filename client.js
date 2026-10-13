@@ -320,12 +320,20 @@ shell.__ModuleLoader__.load({
   position: fixed;
   z-index: 1100;
   box-sizing: border-box;
-  /* Above the pill and centred on it. A browser without CSS anchor positioning
-     drops these three declarations and the user agent's own inset/margin
-     centring stands in, which is why the gap is a translate: a margin here
-     would override that centring and strand the panel in a corner. */
-  position-area: top;
-  justify-self: center;
+  /* Above the pill and centred on it. The "center" half is load-bearing:
+     position-area alone selects the whole strip above the anchor, which is
+     viewport-wide, so centring inside it centres on the viewport rather than on
+     the pill. A browser without CSS anchor positioning drops all three
+     declarations and the user agent's own inset/margin centring stands in,
+     which is why the gap is a translate: a margin here would override that
+     centring and strand the panel in a corner.
+     No position-try-fallbacks: measured in Chrome, flip-block never fires here.
+     When the panel does not fit above the anchor Chrome slides it into the
+     viewport instead, and that corrected position counts as fitting, so the
+     fallback is never consulted and the panel simply covers the pill. The dock
+     sits at the bottom of the window with the whole conversation above it, so
+     that only happens in a window too short for the app to be usable. */
+  position-area: top center;
   translate: 0 -0.5rem;
   width: max-content;
   min-width: min(18.75rem, calc(100vw - 1.5rem));
@@ -443,11 +451,14 @@ shell.__ModuleLoader__.load({
         popovertarget: id,
         'aria-label': 'Estimated session spend ' + total + '. Show the breakdown.',
         title: 'Show the cost breakdown',
+        // The button is what the panel positions against, so the anchor name
+        // belongs here and the reference belongs on the panel.
+        style: { anchorName: anchor },
       }, total);
 
-      // Only the two anchor properties are per-instance; the skin is PILL_CSS.
-      // The trigger precedes the popover so the pill can pick up the panel's
-      // open state through :has().
+      // Only the anchor pair is per-instance; the skin is PILL_CSS. The
+      // trigger precedes the popover so the pill can pick up the panel's open
+      // state through :has().
       const popover = h('section', {
         key: 'breakdown',
         id,
@@ -455,7 +466,7 @@ shell.__ModuleLoader__.load({
         className: 'dsh-cost-panel',
         'data-cost-breakdown': '',
         'aria-labelledby': titleId,
-        style: { anchorName: anchor, positionAnchor: anchor },
+        style: { positionAnchor: anchor },
       }, [
         h('header', { key: 'header', className: 'dsh-cost-panel-header' }, [
           h('h2', { key: 'title', id: titleId, className: 'dsh-cost-panel-title' }, 'Estimated session spend'),

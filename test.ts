@@ -332,6 +332,11 @@ describe('renderCostPill', () => {
     assert.match(css, /padding: 1rem/);
     assert.match(css, /font-size: 0\.75rem/);
 
+    // Placed above the pill: "top center" names the cell directly above the
+    // anchor. Plain "top" would name the viewport-wide strip above it, and the
+    // panel would centre on the window instead of on the pill.
+    assert.match(css, /position-area: top center/);
+
     // The pill is the dock's pill too, hover affordance and all.
     assert.match(css, /\.dsh-cost-pill:hover/);
     assert.match(css, /var\(--dsw-alias-interactive-bg-hover\)/);
@@ -351,11 +356,14 @@ describe('renderCostPill', () => {
   });
 
   // The only per-instance style is the anchor pair that ties this panel to this
-  // pill, so two cost pills can never position against each other.
-  it('carries no inline theming, only the per-instance anchor', () => {
-    const [, , popover] = render();
-    assert.deepEqual(Object.keys(popover.props.style).sort(), ['anchorName', 'positionAnchor']);
-    assert.equal(popover.props.style.anchorName, '--cost-pill-1');
+  // pill, so two cost pills can never position against each other. The name
+  // goes on the button and the reference on the panel: swapped, the panel would
+  // anchor to itself and float free of the pill.
+  it('carries no inline theming, only the anchor pair', () => {
+    const [, trigger, popover] = render();
+    assert.deepEqual(Object.keys(trigger.props.style), ['anchorName']);
+    assert.deepEqual(Object.keys(popover.props.style), ['positionAnchor']);
+    assert.equal(trigger.props.style.anchorName, '--cost-pill-1');
     assert.equal(popover.props.style.positionAnchor, '--cost-pill-1');
   });
 
