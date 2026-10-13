@@ -32,6 +32,7 @@ code of its own.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/pill-cost.png" alt="The cost pill" width="330">
+  <img src="https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/panel.png" alt="The cost breakdown panel open above the pill" width="420">
 </p>
 
 ![Full window with the pill running](https://raw.githubusercontent.com/vegerot/deepseek-harness-session-cost-pill/main/docs/session-window.png)
